@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MHK Nova - AI Chatbot</title>
+    <!-- Markdown parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #fdf2f8 0%, #f3e8ff 50%, #e0e7ff 100%);
+            --glass-bg: rgba(255, 255, 255, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.4);
+            --primary-text: #1f2937;
+            --accent-purple: #a855f7;
+        }
+
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            gap: 40px;
+            align-items: center;
+            max-width: 1400px;
+            width: 95%;
+        }
+
+        .brand-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+
+        .brand-pill {
+            background: #fff;
+            padding: 20px 50px;
+            border-radius: 100px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+            width: fit-content;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            white-space: nowrap;
+        }
+
+        .company-logo {
+            width: 130px;
+            height: 130px;
+            object-fit: contain;
+            background: white;
+            border-radius: 50%;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .brand-pill h1 {
+            margin: 0;
+            font-size: 5rem;
+            color: var(--primary-text);
+            font-weight: 700;
+            letter-spacing: -2px;
+        }
+
+
+
+        .chat-window {
+            flex: 1.2;
+            min-width: 600px;
+            max-width: 700px;
+            height: 650px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 1px solid var(--glass-border);
+            border-radius: 40px;
+            display: flex;
+            flex-direction: column;
+            padding: 40px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.08);
+        }
+
+        .chat-header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .sparkle-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+        }
+
+        .chat-header p {
+            font-size: 1.4rem;
+            color: #4b5563;
+            font-weight: 400;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 12px 18px;
+            border-radius: 18px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .user-message {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #a855f7, #9333ea);
+            color: white;
+        }
+
+        .bot-message {
+            align-self: flex-start;
+            background: white;
+            color: #1f2937;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            line-height: 1.6;
+        }
+
+        /* --- Markdown content inside bot bubbles --- */
+        .bot-message p {
+            margin: 0 0 8px 0;
+        }
+
+        .bot-message p:last-child {
+            margin-bottom: 0;
+        }
+
+        .bot-message strong {
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .bot-message em {
+            font-style: italic;
+        }
+
+        .bot-message ul,
+        .bot-message ol {
+            margin: 6px 0 10px 20px;
+            padding: 0;
+        }
+
+        .bot-message li {
+            margin: 4px 0;
+        }
+
+        /* Clickable apply / reference links */
+        .bot-message a {
+            color: #7c3aed;
+            font-weight: 600;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(124, 58, 237, 0.3);
+            transition: border-color 0.2s;
+        }
+
+        .bot-message a:hover {
+            border-color: #7c3aed;
+        }
+
+        /* Job card blocks — each numbered item becomes a mini card */
+        .bot-message .job-card {
+            background: #faf5ff;
+            border: 1px solid #e9d5ff;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 10px 0;
+        }
+
+        .bot-message .job-card-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #6d28d9;
+            margin-bottom: 6px;
+        }
+
+        .bot-message .job-meta-row {
+            font-size: 0.85rem;
+            color: #4b5563;
+            margin: 3px 0;
+        }
+
+        .bot-message .apply-btn {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 6px 14px;
+            background: linear-gradient(135deg, #a855f7, #7c3aed);
+            color: white !important;
+            border: none !important;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none !important;
+            transition: opacity 0.2s;
+        }
+
+        .bot-message .apply-btn:hover {
+            opacity: 0.88;
+        }
+
+        .loading {
+            display: flex;
+            gap: 5px;
+            padding: 12px 18px;
+        }
+
+        .loading span {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #a855f7;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .loading span:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+
+        .loading span:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+
+        @keyframes bounce {
+
+            0%,
+            80%,
+            100% {
+                transform: scale(0);
+            }
+
+            40% {
+                transform: scale(1);
+            }
+        }
+
+        .chat-footer {
+            margin-top: auto;
+        }
+
+        .suggestions-label {
+            font-size: 0.9rem;
+            color: #6b7280;
+            margin-bottom: 12px;
+            font-weight: 500;
+        }
+
+        .chips {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .chip {
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            padding: 14px 24px;
+            border-radius: 16px;
+            font-size: 0.95rem;
+            color: #374151;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .chip:hover {
+            background: #fff;
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        .input-area {
+            background: #fff;
+            border-radius: 20px;
+            border: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            padding: 8px 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+        }
+
+        .input-area input {
+            border: none;
+            outline: none;
+            width: 100%;
+            padding: 15px;
+            font-size: 1.1rem;
+            color: #1f2937;
+        }
+
+        .send-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #a855f7;
+            font-size: 1.6rem;
+            padding: 5px;
+            transition: transform 0.2s;
+        }
+
+        .send-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="brand-section">
+            <div class="brand-pill">
+                <img src="./public/mhklogo.png" alt="MHK Logo" class="company-logo">
+                <h1>MHK Nova</h1>
+            </div>
+
+
+        </div>
+
+        <div class="chat-window">
+            <div class="chat-header" id="chatHeader">
+                <div class="sparkle-icon">✨</div>
+                <p>Ask our AI anything</p>
+            </div>
+
+            <div class="chat-messages hidden" id="chatMessages"></div>
+
+            <div class="chat-footer">
+                <div class="suggestions-label" id="suggestionsLabel">Suggestions on what to ask Our AI</div>
+                <div class="chips" id="chips">
+                    <div class="chip" onclick="sendSuggestion('What services does MHK offer?')">What services does MHK
+                        offer?
+                    </div>
+                    <div class="chip" onclick="sendSuggestion('What is AI?')">What is AI?
+                    </div>
+                </div>
+                <div class="input-area">
+                    <input type="text" id="userInput" placeholder="Ask me anything about your projects"
+                        onkeypress="handleKeyPress(event)">
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Use relative path for Vercel deployment
+        // This works for both local development (if proxy set up) and production
+        const API_URL = 'http://localhost:8000/api/v1/agent/chat';
+        const conversationHistory = [];
+        // Generate a stable session ID for this browser tab
+        const SESSION_ID = 'sess-' + Math.random().toString(36).substr(2, 12);
+        // meeting_session_id is returned by backend during scheduling flow; must be echoed back each turn
+        let meetingSessionId = null;
+        console.log("Chatbot API URL configured to:", API_URL);
+        console.log("Session ID:", SESSION_ID);
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        function sendSuggestion(text) {
+            document.getElementById('userInput').value = text;
+            sendMessage();
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Hide header and suggestions on first message
+            const chatHeader = document.getElementById('chatHeader');
+            const suggestionsLabel = document.getElementById('suggestionsLabel');
+            const chips = document.getElementById('chips');
+            const chatMessages = document.getElementById('chatMessages');
+
+            if (chatHeader.style.display !== 'none') {
+                chatHeader.style.display = 'none';
+                suggestionsLabel.classList.add('hidden');
+                chips.classList.add('hidden');
+                chatMessages.classList.remove('hidden');
+            }
+
+            // Add user message
+            addMessage(message, 'user');
+            input.value = '';
+
+            // Disable send button
+            const sendBtn = document.getElementById('sendBtn');
+            sendBtn.disabled = true;
+
+            // Show loading
+            const loadingId = addLoading();
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: message,
+                        conversation_id: SESSION_ID,
+                        history: conversationHistory,
+                        // Echo back meeting session ID so backend can restore scheduling state
+                        meeting_session_id: meetingSessionId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Persist meeting_session_id for next turn
+                if (data.meeting_session_id) {
+                    meetingSessionId = data.meeting_session_id;
+                }
+
+                // Remove loading
+                removeLoading(loadingId);
+
+                // Add bot response
+                addMessage(data.response, 'bot');
+
+                // Update conversation history
+                conversationHistory.push({
+                    role: 'user',
+                    content: message
+                });
+                conversationHistory.push({
+                    role: 'assistant',
+                    content: data.response
+                });
+
+            } catch (error) {
+                console.error('Error:', error);
+                removeLoading(loadingId);
+                addMessage('Sorry, I encountered an error. Please make sure the backend server is running.', 'bot');
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        function addMessage(text, type) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}-message`;
+
+            if (type === 'bot') {
+                // Parse markdown → HTML, then post-process job cards
+                marked.use({ breaks: true, gfm: true });
+                let html = marked.parse(text);
+
+                // Post-process: wrap numbered job entries in styled cards
+                // Detects pattern: <p> or top-level block starting with a digit+period
+                // This is a progressive enhancement — plain markdown still looks fine
+                html = html
+                    // Make apply links look like buttons
+                    .replace(
+                        /👉\s*<strong>Apply here:<\/strong>\s*<a href="([^"]+)"([^>]*)>([^<]+)<\/a>/g,
+                        '<a href="$1" target="_blank" rel="noopener" class="apply-btn">🚀 Apply Now</a>'
+                    )
+                    .replace(
+                        /🔗 Apply\s*:\s*<a href="([^"]+)"([^>]*)>([^<]+)<\/a>/g,
+                        '<a href="$1" target="_blank" rel="noopener" class="apply-btn">🚀 Apply Now</a>'
+                    )
+                    // Also handle plain bare URLs after apply emoji/label that weren't linked by marked
+                    .replace(
+                        /🔗 Apply\s*:\s*(https?:\/\/[^\s<"]+)/g,
+                        '<a href="$1" target="_blank" rel="noopener" class="apply-btn">🚀 Apply Now</a>'
+                    )
+                    .replace(
+                        /👉 \*\*Apply here:\*\*\s*(https?:\/\/[^\s<"]+)/g,
+                        '<a href="$1" target="_blank" rel="noopener" class="apply-btn">🚀 Apply Now</a>'
+                    );
+
+                messageDiv.innerHTML = html;
+
+                // Open all links in new tab
+                messageDiv.querySelectorAll('a:not(.apply-btn)').forEach(a => {
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                });
+            } else {
+                // User messages: plain text (safe)
+                messageDiv.textContent = text;
+            }
+
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function addLoading() {
+            const messagesDiv = document.getElementById('chatMessages');
+            const loadingDiv = document.createElement('div');
+            const loadingId = 'loading-' + Date.now();
+            loadingDiv.id = loadingId;
+            loadingDiv.className = 'message bot-message loading';
+            loadingDiv.innerHTML = '<span></span><span></span><span></span>';
+            messagesDiv.appendChild(loadingDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            return loadingId;
+        }
+
+        function removeLoading(loadingId) {
+            const loadingDiv = document.getElementById(loadingId);
+            if (loadingDiv) {
+                loadingDiv.remove();
+            }
+        }
+    </script>
+
+</body>
+
+</html>

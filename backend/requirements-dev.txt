@@ -1,0 +1,24 @@
+# =============================================================================
+# Development Dependencies
+# =============================================================================
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+httpx==0.26.0  # For testing FastAPI
+
+# Code Quality
+black==23.12.1
+isort==5.13.2
+flake8==7.0.0
+mypy==1.8.0
+pylint==3.0.3
+
+# Type Stubs
+types-requests==2.31.0.20240106
+
+# Jupyter (for experimentation)
+jupyter==1.0.0
+ipykernel==6.29.0

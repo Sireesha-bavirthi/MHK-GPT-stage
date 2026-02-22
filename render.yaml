@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: mhk-nova-backend
+    env: python
+    region: oregon
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: QDRANT_HOST
+        sync: false
+      - key: QDRANT_PORT
+        value: 6333
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: QDRANT_COLLECTION_NAME
+        value: company_docs
+      - key: QDRANT_VECTOR_SIZE
+        value: 1536
+      - key: CHUNK_SIZE
+        value: 1000
+      - key: CHUNK_OVERLAP
+        value: 200
+      - key: RETRIEVAL_TOP_K
+        value: 5
+      - key: RETRIEVAL_FETCH_K
+        value: 20
+      - key: RETRIEVAL_LAMBDA_MULT
+        value: 0.7
+      - key: MAX_CONVERSATION_HISTORY
+        value: 10
+      - key: COMPANY_NAME
+        value: MHKTech
+      - key: LOG_LEVEL
+        value: INFO

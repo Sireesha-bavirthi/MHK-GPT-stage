@@ -136,6 +136,7 @@ async def _send_via_smtp(to_email: str, subject: str, html_body: str) -> bool:
             password=settings.SMTP_PASSWORD,
             use_tls=False,
             start_tls=True,
+            timeout=15,
         )
         logger.info(f"OTP email sent via SMTP to {to_email}")
         return True
@@ -169,11 +170,14 @@ async def _send_via_sendgrid(to_email: str, subject: str, html_body: str) -> boo
 
 
 async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
-    """Try SMTP first (App Password set), then SendGrid."""
+    """Try SendGrid first (HTTPS, works on all hosts), then SMTP as fallback."""
+    if settings.SENDGRID_API_KEY:
+        if await _send_via_sendgrid(to_email, subject, html_body):
+            return True
     if settings.SMTP_PASSWORD:
         if await _send_via_smtp(to_email, subject, html_body):
             return True
-    return await _send_via_sendgrid(to_email, subject, html_body)
+    return False
 
 
 async def send_otp_email(to_email: str, otp: str) -> bool:

@@ -29,7 +29,8 @@ IMPORTANT RULES:
    - FORMATTING RULE: Do not output walls of plain text. Use Markdown extensively to make your responses easy to read. Use bullet points (`-`) for lists, and use **bold** text to highlight at least two or three important keywords, names, or concepts in every response.
 
 2. **Factual/informational questions (excluding persona/chitchat above)**: ONLY use the Context below.
-   - CRITICAL: If the answer is NOT explicitly stated in the provided Context, you MUST reply ONLY with: "I don't have that information. Please ask about {company_name}'s services or products."
+   - CRITICAL: For factual questions, if the answer is NOT explicitly stated in the provided Context, you MUST reply ONLY with: "I don't have that information. Please ask about {company_name}'s services or products."
+   - Do NOT apply this fallback to the casual conversation, greetings, or confirmations mentioned in Rule 1.
    - DO NOT try to be helpful by providing general definitions or outside knowledge (e.g. if asked about "debugging code" and it's not in the context, do not explain what debugging is).
    - Never make assumptions or go beyond the information provided in the context.
 
@@ -41,8 +42,7 @@ Context:
 
 USER_PROMPT = """Question: {query}
 
-Please provide a helpful, but STRICTLY CONCISE answer based ONLY on the context provided.
-Do not elaborate, hallucinate extra details, or rewrite short facts into long paragraphs. Keep your answer brief and directly to the point."""
+Please provide a helpful answer based on the context provided."""
 
 
 # =============================================================================

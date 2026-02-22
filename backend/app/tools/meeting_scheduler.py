@@ -136,7 +136,6 @@ async def _send_via_smtp(to_email: str, subject: str, html_body: str) -> bool:
             password=settings.SMTP_PASSWORD,
             use_tls=False,
             start_tls=True,
-            timeout=15,
         )
         logger.info(f"OTP email sent via SMTP to {to_email}")
         return True
@@ -170,14 +169,11 @@ async def _send_via_sendgrid(to_email: str, subject: str, html_body: str) -> boo
 
 
 async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
-    """Try SendGrid first (HTTPS, works on all hosts), then SMTP as fallback."""
-    if settings.SENDGRID_API_KEY:
-        if await _send_via_sendgrid(to_email, subject, html_body):
-            return True
+    """Try SMTP first (App Password set), then SendGrid."""
     if settings.SMTP_PASSWORD:
         if await _send_via_smtp(to_email, subject, html_body):
             return True
-    return False
+    return await _send_via_sendgrid(to_email, subject, html_body)
 
 
 async def send_otp_email(to_email: str, otp: str) -> bool:
@@ -215,6 +211,41 @@ async def send_confirmation_email(to_email: str, slot_label: str, meet_link: str
 """
     return await _send_email(to_email, "Meeting Confirmed — MHK Tech", html_body)
 
+
+# =============================================================================
+# Rate Limiting (Daily Meeting Limits)
+# =============================================================================
+
+def check_daily_meeting_limit(email: str, max_meetings: int = 2) -> bool:
+    """
+    Check if the user has reached the daily limit for scheduling meetings.
+    Uses Redis to store the count. TTL is set to 24 hours.
+    Returns True if allowed, False if limit reached.
+    """
+    client = _redis()
+    if not client:
+         # If Redis is down, fail open to avoid totally breaking the system
+        return True
+        
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    key = f"meeting_limit:{email.lower()}:{today}"
+    
+    try:
+        current_count = client.get(key)
+        if current_count and int(current_count) >= max_meetings:
+            logger.info(f"Rate limit hit for meeting scheduling: {email} ({current_count}/{max_meetings})")
+            return False
+            
+        # Increment token and set TTL to 24 hours if it's a new key
+        pipe = client.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, 24 * 60 * 60) # 24 hours
+        pipe.execute()
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to check daily limit in Redis: {e}")
+        return True # Fail open
 
 # =============================================================================
 # Email Validation
@@ -501,7 +532,8 @@ async def handle_message(
     # CANCELLATION
     # -------------------------------------------------------------------------
     user_msg_lower = user_message.strip().lower()
-    if state not in ("initial", "completed") and user_msg_lower in ("cancel", "stop", "exit", "quit", "nevermind"):
+    cancel_keywords = ["cancel", "stop", "exit", "quit", "nevermind"]
+    if state not in ("initial", "completed") and any(kw in user_msg_lower for kw in cancel_keywords):
         delete_session(session.session_id)
         session.state = "completed"
         return "No problem! I've cancelled the meeting scheduling. Let me know if there's anything else I can help you with! ", session
@@ -538,6 +570,15 @@ async def handle_message(
         api_valid, api_msg = await validate_email_with_abstract(email)
         if not api_valid:
             return api_msg, session
+
+        # Step 3: Daily Rate Limit Check
+        if not check_daily_meeting_limit(email):
+            delete_session(session.session_id)
+            session.state = "completed"
+            return (
+                " You have reached the maximum limit of 2 meeting requests per day for this email address. "
+                "Please try again tomorrow or contact us directly at hr@mhktechinc.com."
+            ), session
 
         # All validation passed — send OTP
         otp = generate_otp()

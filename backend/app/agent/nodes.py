@@ -174,7 +174,8 @@ def intent_detection_node(state: AgentState) -> dict:
         sess = load_session(meeting_session_id)
         if sess and sess.state not in ("initial", "completed"):
             query_lower = query.lower().strip()
-            is_cancel = query_lower in ("cancel", "stop", "exit", "quit", "nevermind")
+            cancel_keywords = ["cancel", "stop", "exit", "quit", "nevermind"]
+            is_cancel = any(kw in query_lower for kw in cancel_keywords)
             
             should_fast_path = is_cancel
             if not should_fast_path:
@@ -189,7 +190,7 @@ def intent_detection_node(state: AgentState) -> dict:
                         should_fast_path = True # wants to change email but hasn't provided it yet
                 elif sess.state in ("awaiting_duration", "awaiting_slot") and len(query) <= 5:
                     should_fast_path = True
-                elif query_lower in ("yes", "ok", "sure", "no"):
+                elif any(kw in query_lower for kw in ["yes", "ok", "sure", "no"]):
                     should_fast_path = True
             
             if should_fast_path:

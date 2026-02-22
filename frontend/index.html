@@ -384,10 +384,8 @@
     </div>
 
     <script>
-        // Backend URL — replace with your Render service URL after deploying
-        // e.g. https://mhk-nova-backend.onrender.com
-        const BACKEND_URL = 'https://mhk-nova-backend.onrender.com';
-        const API_URL = BACKEND_URL + '/api/v1/agent/chat';
+        // Relative URL — works since frontend and backend are served from the same Render service
+        const API_URL = '/api/v1/agent/chat';
         const conversationHistory = [];
         // Generate a stable session ID for this browser tab
         const SESSION_ID = 'sess-' + Math.random().toString(36).substr(2, 12);

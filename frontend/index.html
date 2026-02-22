@@ -384,9 +384,10 @@
     </div>
 
     <script>
-        // Use relative path for Vercel deployment
-        // This works for both local development (if proxy set up) and production
-        const API_URL = 'http://localhost:8000/api/v1/agent/chat';
+        // Backend URL — replace with your Render service URL after deploying
+        // e.g. https://mhk-nova-backend.onrender.com
+        const BACKEND_URL = 'https://mhk-nova-backend.onrender.com';
+        const API_URL = BACKEND_URL + '/api/v1/agent/chat';
         const conversationHistory = [];
         // Generate a stable session ID for this browser tab
         const SESSION_ID = 'sess-' + Math.random().toString(36).substr(2, 12);

@@ -1,42 +1,145 @@
 services:
+  # ============================================================
+  # Backend — FastAPI web service
+  # ============================================================
   - type: web
     name: mhk-nova-backend
     env: python
     region: oregon
-    buildCommand: pip install -r backend/requirements.txt
+    buildCommand: pip install -r backend/requirements-prod.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.13.0
+        value: 3.11.0
+
+      # --- API ---
+      - key: API_ENV
+        value: production
+      - key: API_RELOAD
+        value: false
+      - key: COMPANY_NAME
+        value: MHK Tech Inc
+
+      # --- OpenAI ---
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
-        value: gpt-4o
+        value: gpt-4o-mini
       - key: OPENAI_EMBEDDING_MODEL
         value: text-embedding-3-small
-      - key: QDRANT_HOST
+      - key: EMBEDDING_PROVIDER
+        value: openai
+
+      # --- Qdrant Cloud ---
+      - key: QDRANT_URL
         sync: false
-      - key: QDRANT_PORT
-        value: 6333
       - key: QDRANT_API_KEY
         sync: false
       - key: QDRANT_COLLECTION_NAME
         value: company_docs
       - key: QDRANT_VECTOR_SIZE
         value: 1536
-      - key: CHUNK_SIZE
-        value: 1000
-      - key: CHUNK_OVERLAP
-        value: 200
+
+      # --- Redis (linked from service below) ---
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: mhk-redis
+          property: connectionString
+
+      # --- Retrieval ---
+      - key: RETRIEVAL_STRATEGY
+        value: hybrid
       - key: RETRIEVAL_TOP_K
-        value: 5
+        value: 10
       - key: RETRIEVAL_FETCH_K
         value: 20
       - key: RETRIEVAL_LAMBDA_MULT
         value: 0.7
+      - key: HYBRID_KEYWORD_WEIGHT
+        value: 0.3
+      - key: HYBRID_SEMANTIC_WEIGHT
+        value: 0.7
+
+      # --- Document Processing ---
+      - key: CHUNK_SIZE
+        value: 1000
+      - key: CHUNK_OVERLAP
+        value: 200
+      - key: MAX_FILE_SIZE_MB
+        value: 50
+
+      # --- Agent ---
       - key: MAX_CONVERSATION_HISTORY
         value: 10
-      - key: COMPANY_NAME
-        value: MHKTech
+      - key: INTENT_CONFIDENCE_THRESHOLD
+        value: 0.85
+      - key: MAX_CLARIFICATION_TURNS
+        value: 2
+
+      # --- JobDiva ---
+      - key: JOBDIVA_CLIENT_ID
+        value: 2156
+      - key: JOBDIVA_USERNAME
+        sync: false
+      - key: JOBDIVA_PASSWORD
+        sync: false
+      - key: JOBDIVA_BASE_URL
+        value: https://api.jobdiva.com/apiv2
+
+      # --- Email ---
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        value: backuptata2005@gmail.com
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USERNAME
+        value: backuptata2005@gmail.com
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        value: backuptata2005@gmail.com
+
+      # --- Google Calendar ---
+      - key: GOOGLE_CALENDAR_ID
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+
+      # --- Calendly ---
+      - key: CALENDLY_15MIN_URL
+        value: https://calendly.com/n200029-rguktn/sample-meet
+      - key: CALENDLY_30MIN_URL
+        value: https://calendly.com/n200029-rguktn/sample-meet
+      - key: CALENDLY_60MIN_URL
+        value: https://calendly.com/n200029-rguktn/sample-meet
+
+      # --- Rate Limiting ---
+      - key: RATE_LIMIT_ENABLED
+        value: true
+      - key: RATE_LIMIT_CHAT
+        value: 20/minute
+      - key: RATE_LIMIT_UPLOAD
+        value: 5/minute
+
+      # --- Security ---
+      - key: SECRET_KEY
+        generateValue: true
+      # Update this to your Vercel frontend URL after frontend deployment
+      - key: CORS_ORIGINS
+        value: https://your-frontend.vercel.app,http://localhost:3000,http://localhost:8000
+
+      # --- Logging ---
       - key: LOG_LEVEL
         value: INFO
+
+  # ============================================================
+  # Redis — session store + job cache
+  # ============================================================
+  - type: redis
+    name: mhk-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru

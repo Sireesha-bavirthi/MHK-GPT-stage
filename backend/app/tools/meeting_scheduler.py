@@ -38,9 +38,14 @@ _PERSONAL_PROVIDERS = frozenset({
     "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
     "yahoo.co.in", "rediffmail.com", "live.com", "msn.com", "googlemail.com",
     "aol.com", "protonmail.com", "me.com", "mac.com", "ymail.com",
-    "zoho.com", "tutanota.com", "mail.com", "inbox.com", "yandex.com",
+    "zoho.com", "tutanota.com", "mail.com", "inbox.com", "yandex.com"
 })
-
+# Temporary disposable email domains
+_DISPOSABLE_DOMAINS = frozenset({
+    "mailinator.com","guerrillamail.com","sharklasers.com","10minutemail.com",
+    "temp-mail.org","yopmail.com","maildrop.cc","getnada.com","throwawaymail.com",
+    "dispostable.com"
+})
 SESSION_TTL = 15 * 60    # 15 minutes
 OTP_EXPIRY  = 10 * 60    # 10 minutes
 
@@ -136,7 +141,6 @@ async def _send_via_smtp(to_email: str, subject: str, html_body: str) -> bool:
             password=settings.SMTP_PASSWORD,
             use_tls=False,
             start_tls=True,
-            timeout=15,
         )
         logger.info(f"OTP email sent via SMTP to {to_email}")
         return True
@@ -170,14 +174,11 @@ async def _send_via_sendgrid(to_email: str, subject: str, html_body: str) -> boo
 
 
 async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
-    """Try SendGrid first (HTTPS, works on all hosts), then SMTP as fallback."""
-    if settings.SENDGRID_API_KEY:
-        if await _send_via_sendgrid(to_email, subject, html_body):
-            return True
+    """Try SMTP first (App Password set), then SendGrid."""
     if settings.SMTP_PASSWORD:
         if await _send_via_smtp(to_email, subject, html_body):
             return True
-    return False
+    return await _send_via_sendgrid(to_email, subject, html_body)
 
 
 async def send_otp_email(to_email: str, otp: str) -> bool:
@@ -266,6 +267,8 @@ def validate_business_email(email: str) -> Tuple[bool, str]:
         return False, (
             f"Please use your **business email** — personal addresses like **@{domain}** are not accepted."
         )
+    if domain in _DISPOSABLE_DOMAINS:
+        return False, "Temporary or disposable email addresses are not allowed."
     return True, ""
 
 

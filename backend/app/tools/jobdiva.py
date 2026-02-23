@@ -248,8 +248,7 @@ async def search_jobs(
 ) -> Dict[str, Any]:
     """
     Search for open job positions from JobDiva live API.
-    Applies client-side filtering by role keyword, location (city/state), status.
-    Returns a dict with `jobs` list and metadata.
+    Fetches all jobs, caches them in Redis under a single key, and applies client-side filtering.
     """
     if _circuit_breaker.is_open:
         return {
@@ -259,71 +258,84 @@ async def search_jobs(
         }
 
     redis = _get_redis()
-    cache_key = f"jobdiva:jobs:{role or ''}:{location or ''}:{status or ''}"
+    cache_key = "jobdiva:all_jobs"
+    raw_jobs = None
+    is_cached = False
+
+    # 1) Try to load the FULL job list from Redis
     if redis:
-        cached_raw = redis.get(cache_key)
-        if cached_raw:
-            logger.info(f"JobDiva jobs returned from cache (key={cache_key})")
-            return {**json.loads(cached_raw), "cached": True}
+        try:
+            cached_raw = redis.get(cache_key)
+            if cached_raw:
+                raw_jobs = json.loads(cached_raw)
+                is_cached = True
+                logger.info("JobDiva full job list loaded from Redis cache")
+        except Exception as e:
+            logger.error(f"Failed to read from Redis cache: {e}")
 
-    token = await get_token()
-    if not token:
-        return {
-            "error": "Could not authenticate with JobDiva. Please try again later.",
-            "jobs": [],
-            "cached": False,
-        }
+    # 2) If not in Redis, fetch from JobDiva API and cache
+    if raw_jobs is None:
+        token = await get_token()
+        if not token:
+            return {
+                "error": "Could not authenticate with JobDiva. Please try again later.",
+                "jobs": [],
+                "cached": False,
+            }
 
-    try:
-        raw_jobs = await _fetch_open_jobs(token)
-        _circuit_breaker.on_success()
-        logger.info(f"JobDiva returned {len(raw_jobs)} open jobs from live API")
-    except Exception as e:
-        _circuit_breaker.on_failure()
-        logger.error(f"JobDiva fetch failed: {e}")
-        return {
-            "error": "Unable to retrieve job listings right now. Please check back shortly.",
-            "jobs": [],
-            "cached": False,
-        }
+        try:
+            raw_jobs = await _fetch_open_jobs(token)
+            _circuit_breaker.on_success()
+            logger.info(f"JobDiva returned {len(raw_jobs)} open jobs from live API")
+            
+            # Cache the full list
+            if redis:
+                try:
+                    redis.setex(cache_key, settings.JOB_CACHE_TTL_SECONDS, json.dumps(raw_jobs))
+                    logger.info(f"JobDiva full job list cached for {settings.JOB_CACHE_TTL_SECONDS}s")
+                except Exception as e:
+                    logger.error(f"Failed to write to Redis cache: {e}")
+        except Exception as e:
+            _circuit_breaker.on_failure()
+            logger.error(f"JobDiva fetch failed: {e}")
+            return {
+                "error": "Unable to retrieve job listings right now. Please check back shortly.",
+                "jobs": [],
+                "cached": False,
+            }
 
-    # Client-side filtering
+    # 3) Client-side filtering
     filtered = raw_jobs
     if role and query_type != "job_detail":
         role_lower = role.lower()
         filtered = [
             j for j in filtered
-            if role_lower in (j.get("TITLE") or "").lower()
+            if role_lower in (str(j.get("TITLE") or "")).lower()
         ]
     if location:
         loc_lower = location.lower()
         filtered = [
             j for j in filtered
             if (
-                loc_lower in (j.get("CITY") or "").lower()
-                or loc_lower in (j.get("STATE") or "").lower()
-                or loc_lower in (j.get("ZIPCODE") or "").lower()
+                loc_lower in (str(j.get("CITY") or "")).lower()
+                or loc_lower in (str(j.get("STATE") or "")).lower()
+                or loc_lower in (str(j.get("ZIPCODE") or "")).lower()
             )
         ]
     if status:
         status_lower = status.lower()
         filtered = [
             j for j in filtered
-            if status_lower in (j.get("JOBSTATUS") or "").lower()
+            if status_lower in (str(j.get("JOBSTATUS") or "")).lower()
         ]
 
-    result = {
+    return {
         "jobs": filtered,
         "total": len(filtered),
         "raw_total": len(raw_jobs),
         "filters": {"role": role, "location": location, "status": status},
+        "cached": is_cached,
     }
-
-    if redis:
-        redis.setex(cache_key, settings.JOB_CACHE_TTL_SECONDS, json.dumps(result))
-        logger.info(f"JobDiva jobs cached for {settings.JOB_CACHE_TTL_SECONDS}s (key={cache_key})")
-
-    return {**result, "cached": False}
 
 
 # =============================================================================
@@ -426,4 +438,3 @@ def format_jobs_for_llm(search_result: Dict[str, Any]) -> str:
         lines.append("\n_(Results cached — refreshed periodically)_")
 
     return "\n\n".join(lines)
-

@@ -88,7 +88,7 @@ intent values: meeting_scheduler | job_search | general_qa
 sub_intent values:
   meeting_scheduler → quick_call (≤15min) | normal_meet (30–45min, default) | long_discussion (≥1hr)
   job_search        → list_all_jobs | search_by_role | search_by_location | skills_query | salary_query | experience_query | remote_query | job_detail
-  general_qa        → general
+  general_qa        → general | identity | greeting
 
 extracted_params (job_search only):
   { "role": "<title or null>", "location": "<city/state or null>", "status": "<status or null>", "query_type": "<one of the sub_intents above>" }
@@ -116,15 +116,19 @@ The history gives you CONTEXT to correctly classify short or ambiguous messages.
    - Earlier meeting flow, but latest: "actually, show me open jobs" → job_search.
    - Earlier meeting flow, but latest: "What is AI?" or "Who is the CEO?" → general_qa.
 
-4. COMPANY INFO, RAG RETRIEVAL & BOT IDENTITY / INFORMATIVE QUESTIONS / FACTS
-   If the user asks about the company (e.g. MHK Tech, headquarters, locations, projects, clients, CEO, founding date, services), asks about your identity (e.g. "who are you", "what is MHK Nova", "what can you do"), or asks any informational question that does not fit job search or meeting scheduling:
+4. COMPANY INFO, RAG RETRIEVAL & FACTS
+   If the user asks about the company (e.g. MHK Tech, headquarters, locations, projects, clients, CEO, founding date, services) or asks any informational question that does not fit job search or meeting scheduling:
    - Classify as general_qa, sub_intent: general with confidence 0.95 or higher.
 
-5. GREETINGS, CHITCHAT, CONFIRMATIONS & CLOSINGS
-   If the user says things like "hi", "hello", "hey", "good morning", "how are you", "bye", "goodbye", "thank you", "thanks", "see you later", "ok", "okay", "sure", "sounds good", "perfect", "done", "no thanks",
-   classify as general_qa, sub_intent: general with confidence 1.0.
+5. BOT IDENTITY & CAPABILITIES
+   If the user asks about your identity or what you can do (e.g., "who are you", "what is MHK Nova", "what can you do", "what are your capabilities", "are you an AI"):
+   - Classify as general_qa, sub_intent: identity with confidence 1.0.
 
-6. AMBIGUOUS / VERY SHORT MESSAGES (without clear history context)
+6. GREETINGS, CHITCHAT, CONFIRMATIONS & CLOSINGS
+   If the user says things like "hi", "hello", "hey", "good morning", "how are you", "bye", "goodbye", "thank you", "thanks", "see you later", "ok", "okay", "sure", "sounds good", "perfect", "done", "no thanks",
+   classify as general_qa, sub_intent: greeting with confidence 1.0.
+
+7. AMBIGUOUS / VERY SHORT MESSAGES (without clear history context)
    If you truly cannot tell — use general_qa with confidence ≤ 0.60.
    Do NOT invent a team name or ask clarifying questions; just classify.
 
@@ -446,6 +450,52 @@ Format apply links like:
     return {"type": "job_search", "response": content, "raw_jobs": search_result.get("jobs", [])}
 
 
+async def _run_direct_qa(query: str, session_id: str, messages: list, cost_log: LLMCostLog, sub_intent: str) -> dict:
+    """Run direct LLM QA for identity and greetings, bypassing RAG."""
+    model = settings.OPENAI_MODEL
+    
+    if sub_intent == "identity":
+        system_msg = (
+            "You are MHK Nova, a helpful AI assistant built for MHK Tech Inc. "
+            "Your core capabilities are answering questions about MHK Tech, scheduling meetings, and finding open job positions. "
+            "Answer the user's question about your identity clearly, warmly, and concisely. "
+            "Use 'we' and 'our' when referring to MHK. "
+            "Remember to use Markdown formatting and bold text for important keywords."
+        )
+    elif sub_intent == "greeting":
+        system_msg = (
+            "You are MHK Nova, a helpful AI assistant built for MHK Tech Inc. "
+            "Respond naturally and warmly to the user's greeting, closing, or casual confirmation. "
+            "Keep it brief and conversational. Example: 'I'm doing well, thank you! How can I assist you today?' or 'You're welcome! Have a great day!' "
+            "Do not list your capabilities unless explicitly asked."
+        )
+    else:
+        system_msg = "You are MHK Nova, a helpful AI assistant for MHK Tech Inc."
+
+    llm_messages = [{"role": "system", "content": system_msg}]
+    
+    # Include recent conversation context (last 6 turns limit)
+    for msg in messages[-6:]:
+        if msg.get("role") in ("user", "assistant") and msg.get("content"):
+            llm_messages.append({"role": msg["role"], "content": msg["content"]})
+            
+    llm_messages.append({"role": "user", "content": query})
+
+    try:
+        content, usage = _chat_completion(llm_messages, model=model, temperature=0.5, max_tokens=200)
+        llm_usage = _track_cost(usage, model, stage="qa_generating_direct", intent="general_qa", session_id=session_id)
+        cost_log.add(llm_usage)
+    except Exception as e:
+        logger.error(f"Direct QA failed: {e}")
+        content = "Hello! I am MHK Nova, your AI assistant for MHK Tech. How can I help you?" if sub_intent == "identity" else "Hello! How can I assist you today?"
+        
+    return {
+        "type": "general_qa",
+        "response": content,
+        "sources": [],
+    }
+
+
 async def _run_meeting_scheduler(
     sub_intent: str, session_id: str, query: str, meeting_session_id: Optional[str]
 ) -> dict:
@@ -490,6 +540,8 @@ async def tool_selection_node(state: AgentState) -> dict:
             tasks.append(_run_meeting_scheduler(sub_intent, session_id, query, meeting_session_id))
         elif intent == IntentType.JOB_SEARCH.value:
             tasks.append(_run_job_search(params, query, session_id, cost_log))
+        elif intent == IntentType.GENERAL_QA.value and sub_intent in ("identity", "greeting"):
+            tasks.append(_run_direct_qa(query, session_id, messages, cost_log, sub_intent))
         else:
             tasks.append(_run_general_qa(query, session_id, messages, cost_log))
         intent_types.append(intent)

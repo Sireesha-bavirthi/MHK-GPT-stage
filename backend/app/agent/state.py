@@ -62,8 +62,10 @@ class SubIntentType(str, Enum):
     LIST_ALL_JOBS = "list_all_jobs"
     SEARCH_BY_ROLE = "search_by_role"
     SEARCH_BY_LOCATION = "search_by_location"
-    # QA (no sub-intents needed)
+    # QA
     GENERAL = "general"
+    IDENTITY = "identity"
+    GREETING = "greeting"
 
 
 # =============================================================================

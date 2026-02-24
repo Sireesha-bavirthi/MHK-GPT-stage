@@ -298,7 +298,7 @@ class GeneratorService:
 class ConversationMemory:
     """
     Manages conversation history for multi-turn conversations.
-    Uses LangChain's ConversationBufferWindowMemory under the hood.
+    Uses a native Python list to store OpenAI-formatted messages.
     """
     
     def __init__(self, max_messages: int = 10):
@@ -308,55 +308,34 @@ class ConversationMemory:
         Args:
             max_messages: Maximum messages to keep (excluding system)
         """
-        from langchain.memory import ConversationBufferWindowMemory
-        
         self.max_messages = max_messages
-        # LangChain's memory uses 'k' for number of conversation turns (user+assistant pairs)
-        # Since max_messages is total messages, we divide by 2 to get turns
-        self.memory = ConversationBufferWindowMemory(
-            k=max(1, max_messages // 2),  # At least 1 turn
-            return_messages=True,
-            memory_key="chat_history"
-        )
-        logger.info(f"ConversationMemory initialized with LangChain | max_messages={max_messages}")
+        self.messages: List[Dict[str, str]] = []
+        logger.info(f"ConversationMemory initialized | max_messages={max_messages}")
     
     def add_user_message(self, content: str):
         """Add user message to history."""
-        # Store temporarily to add with assistant message
-        self._pending_user_message = content
+        self.messages.append({"role": "user", "content": content})
+        self._trim_history()
         logger.debug(f"User message added: {content[:50]}...")
     
     def add_assistant_message(self, content: str):
         """Add assistant message to history."""
-        # Add the user-assistant pair to LangChain memory
-        if hasattr(self, '_pending_user_message'):
-            self.memory.save_context(
-                {"input": self._pending_user_message},
-                {"output": content}
-            )
-            delattr(self, '_pending_user_message')
-            logger.debug(f"Assistant message added: {content[:50]}...")
-    
+        self.messages.append({"role": "assistant", "content": content})
+        self._trim_history()
+        logger.debug(f"Assistant message added: {content[:50]}...")
+        
+    def _trim_history(self):
+        """Keep the memory within max_messages bounds."""
+        if len(self.messages) > self.max_messages:
+            self.messages = self.messages[-self.max_messages:]
+            
     def get_history(self) -> List[Dict[str, str]]:
         """Get current conversation history in OpenAI format."""
-        # Get messages from LangChain memory
-        messages = self.memory.load_memory_variables({}).get("chat_history", [])
-        
-        # Convert LangChain messages to OpenAI format
-        history = []
-        for msg in messages:
-            if hasattr(msg, 'type'):
-                # LangChain message objects
-                role = "user" if msg.type == "human" else "assistant"
-                history.append({"role": role, "content": msg.content})
-        
-        return history
+        return list(self.messages)
     
     def clear(self):
         """Clear conversation history."""
-        self.memory.clear()
-        if hasattr(self, '_pending_user_message'):
-            delattr(self, '_pending_user_message')
+        self.messages.clear()
         logger.info("Conversation history cleared")
 
 

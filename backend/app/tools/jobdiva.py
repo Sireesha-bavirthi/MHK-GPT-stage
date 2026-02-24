@@ -344,10 +344,24 @@ async def search_jobs(
 
 def _get_apply_url(job: dict) -> str:
     """
-    All MHK Tech jobs are internal — not published on the public JobDiva portal.
-    Always direct candidates to MHK Tech's own careers page.
+    Construct a direct apply link to the JobDiva portal for this specific job.
+    Uses the JobID and Title from the API response.
     """
-    return _CAREERS_URL
+    import urllib.parse
+    # The public portal URL requires the numerical JOBID (e.g., 31606913)
+    # The JOBDIVANO (e.g., 24-00073) is often an internal reference number that will break the URL
+    job_id = job.get("JOBID") or job.get("JOBDIVANO")
+    title = job.get("TITLE", "")
+    
+    if not job_id:
+        return _CAREERS_URL
+        
+    encoded_title = urllib.parse.quote(title)
+    
+    # User-provided company portal base URL
+    base_portal = "https://www1.jobdiva.com/portal/?a=4xjdnw092xyive6j1s0pzj407hnpm8086cyefjvgfu6xorjfgcb7p7zsbtw5xvlp&compid=0"
+    
+    return f"{base_portal}#/jobs/{job_id}?jobtitle={encoded_title}"
 
 
 def _fmt_salary(job: dict) -> str:

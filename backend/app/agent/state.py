@@ -174,6 +174,7 @@ class AgentState(TypedDict):
     messages: List[dict]              # OpenAI-format conversation history
     session_id: str                   # Unique per-user session
     current_query: str                # The current user message
+    summary: str                      # Rolling conversation summary
 
     # Stage tracking
     stage: str                        # ConversationStage.value
@@ -196,3 +197,6 @@ class AgentState(TypedDict):
 
     # Final aggregated response
     final_response: str
+    
+    # Conversation Summary Buffer
+    summary: str

@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "openai"
     # OpenAI settings
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API key from .env file")
-    OPENAI_MODEL: str = Field(default="gpt-4o-mini", description="OpenAI chat model")
+    OPENAI_MODEL: str = Field(default="gpt-4o", description="OpenAI chat model")
     OPENAI_TEMPERATURE: float = Field(default=0.7, description="OpenAI temperature")
     OPENAI_MAX_TOKENS: int = Field(default=1024, description="Max tokens for OpenAI response")
     

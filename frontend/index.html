@@ -184,6 +184,7 @@
             text-decoration: none;
             border-bottom: 1px solid rgba(124, 58, 237, 0.3);
             transition: border-color 0.2s;
+            word-break: break-all;
         }
 
         .bot-message a:hover {
@@ -384,8 +385,9 @@
     </div>
 
     <script>
-        // Relative URL — works since frontend and backend are served from the same Render service
-        const API_URL = '/api/v1/agent/chat';
+        // Use relative path for Vercel deployment
+        // This works for both local development (if proxy set up) and production
+        const API_URL = 'http://localhost:8000/api/v1/agent/chat';
         const conversationHistory = [];
         // Generate a stable session ID for this browser tab
         const SESSION_ID = 'sess-' + Math.random().toString(36).substr(2, 12);
@@ -499,25 +501,8 @@
                 // Post-process: wrap numbered job entries in styled cards
                 // Detects pattern: <p> or top-level block starting with a digit+period
                 // This is a progressive enhancement — plain markdown still looks fine
-                html = html
-                    // Make apply links look like buttons
-                    .replace(
-                        /👉\s*<strong>Apply here:<\/strong>\s*<a href="([^"]+)"([^>]*)>([^<]+)<\/a>/g,
-                        '<a href="$1" target="_blank" rel="noopener" class="apply-btn">🚀 Apply Now</a>'
-                    )
-                    .replace(
-                        /🔗 Apply\s*:\s*<a href="([^"]+)"([^>]*)>([^<]+)<\/a>/g,
-                        '<a href="$1" target="_blank" rel="noopener" class="apply-btn">🚀 Apply Now</a>'
-                    )
-                    // Also handle plain bare URLs after apply emoji/label that weren't linked by marked
-                    .replace(
-                        /🔗 Apply\s*:\s*(https?:\/\/[^\s<"]+)/g,
-                        '<a href="$1" target="_blank" rel="noopener" class="apply-btn">🚀 Apply Now</a>'
-                    )
-                    .replace(
-                        /👉 \*\*Apply here:\*\*\s*(https?:\/\/[^\s<"]+)/g,
-                        '<a href="$1" target="_blank" rel="noopener" class="apply-btn">🚀 Apply Now</a>'
-                    );
+                // We rely on marked.js to natively parse the raw URL output from the LLM
+                // so the user sees exactly what link they are clicking.
 
                 messageDiv.innerHTML = html;
 

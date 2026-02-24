@@ -110,11 +110,12 @@ The history gives you CONTEXT to correctly classify short or ambiguous messages.
    - Earlier: "show me Data Engineer jobs in Houston"
    - Latest:  "what skills do I need?" → job_search, skills_query, role="Data Engineer", location="Houston"
 
-3. TOPIC SWITCHING & MIDDLE QUESTIONS
+3. TOPIC SWITCHING, MIDDLE QUESTIONS & CANCELLATIONS
    If the user clearly changes topic or asks an out-of-flow question, classify the new topic:
    - Earlier job conversation, but latest: "I want to schedule a meeting" → meeting_scheduler.
    - Earlier meeting flow, but latest: "actually, show me open jobs" → job_search.
    - Earlier meeting flow, but latest: "What is AI?" or "Who is the CEO?" → general_qa.
+   - **CRITICAL**: If the user is currently in a meeting_scheduler flow and says something like "cancel", "stop", "nevermind", "exit", "abort", or "not interested", keep the intent as `meeting_scheduler` so the tool can cleanly cancel it. Do not classify as general_qa.
 
 4. COMPANY INFO, RAG RETRIEVAL & FACTS
    If the user asks about the company (e.g. MHK Tech, headquarters, locations, projects, clients, CEO, founding date, services) or asks any informational question that does not fit job search or meeting scheduling:
@@ -178,23 +179,15 @@ def intent_detection_node(state: AgentState) -> dict:
         sess = load_session(meeting_session_id)
         if sess and sess.state not in ("initial", "completed"):
             query_lower = query.lower().strip()
-            cancel_keywords = ["cancel", "stop", "exit", "quit", "nevermind"]
-            is_cancel = any(kw in query_lower for kw in cancel_keywords)
-            
-            should_fast_path = is_cancel
-            if not should_fast_path:
-                if sess.state == "awaiting_email" and "@" in query and "." in query:
+            should_fast_path = False
+            if sess.state == "awaiting_email":
+                if re.search(r"[\w\.-]+@[\w\.-]+\.\w+", query):
                     should_fast_path = True
-                elif sess.state == "awaiting_otp":
-                    if re.search(r"\b\d{6}\b", query):
-                        should_fast_path = True
-                    elif "@" in query and "." in query:
-                        should_fast_path = True # changing email address mid-OTP
-                    elif any(word in query_lower for word in ["wrong", "incorrect", "change", "not my", "other", "different"]):
-                        should_fast_path = True # wants to change email but hasn't provided it yet
-                elif sess.state in ("awaiting_duration", "awaiting_slot") and len(query) <= 5:
+            elif sess.state == "awaiting_otp":
+                if re.search(r"\b\d{6}\b", query) or re.search(r"[\w\.-]+@[\w\.-]+\.\w+", query):
                     should_fast_path = True
-                elif any(kw in query_lower for kw in ["yes", "ok", "sure", "no"]):
+            elif sess.state in ("awaiting_duration", "awaiting_slot"):
+                if any(kw in query_lower for kw in ["15", "30", "hour", "1", "2", "3", "half"]):
                     should_fast_path = True
             
             if should_fast_path:
@@ -213,8 +206,6 @@ def intent_detection_node(state: AgentState) -> dict:
                     "awaiting_clarification": False,
                     "cost_log": cost_log.to_dict(),
                 }
-
-    # ------------------------------------------------------------------
     # Fast-path 2: obvious meeting/scheduling keywords → skip LLM entirely
     # ------------------------------------------------------------------
     _MEETING_KEYWORDS = (
@@ -223,7 +214,7 @@ def intent_detection_node(state: AgentState) -> dict:
         "talk to someone", "speak to hr", "connect with hr", "connect with your team",
         "meet with", "i want to meet", "can we meet", "schedule time", "book time",
         "i'd like to schedule", "can you schedule", "help me schedule",
-        "schedule with", "set up with", "arrange with",
+        "schedule with", "set up with", "arrange with", "schedule a meet",
     )
     query_lower = query.lower().strip()
     if any(kw in query_lower for kw in _MEETING_KEYWORDS):
@@ -246,8 +237,12 @@ def intent_detection_node(state: AgentState) -> dict:
     conversation_history = state.get("messages", [])
     # Include up to last 10 messages (5 full turns) for richer context
     recent_history = conversation_history[-10:] if conversation_history else []
+    summary = state.get("summary", "")
 
     llm_messages = [{"role": "system", "content": INTENT_SYSTEM_PROMPT}]
+    if summary:
+        llm_messages.append({"role": "system", "content": f"Previous Conversation Summary:\n{summary}"})
+    
     # Add conversation history as individual messages
     for msg in recent_history:
         role = msg.get("role", "user")
@@ -293,6 +288,11 @@ def intent_detection_node(state: AgentState) -> dict:
         elif intent_type == IntentType.GENERAL_QA:
             return 0.30  # Low threshold so we always pass general questions to the LLM
         return threshold
+
+    # Prevent RAG contamination: If meeting scheduler is highly confident, drop weak general QA
+    has_strong_meeting = any(i.intent == IntentType.MEETING_SCHEDULER and i.confidence >= 0.8 for i in intents)
+    if has_strong_meeting:
+        intents = [i for i in intents if not (i.intent == IntentType.GENERAL_QA and i.confidence < 0.7)]
 
     all_above = all(i.confidence >= get_threshold(i.intent) for i in intents)
 
@@ -350,10 +350,14 @@ def clarification_node(state: AgentState) -> dict:
 # Node 3: Tool Execution (handles all intents in parallel for multi-intent)
 # =============================================================================
 
-async def _run_general_qa(query: str, session_id: str, messages: list, cost_log: LLMCostLog) -> dict:
+async def _run_general_qa(query: str, session_id: str, messages: list, cost_log: LLMCostLog, summary: str = "") -> dict:
     """Run the existing RAG pipeline for general Q&A."""
     # RAGPipeline lives at backend/rag_pipeline.py (root-level module, not inside app/)
     from rag_pipeline import RAGPipeline
+
+    # Inject summary if present
+    if summary:
+        messages = [{"role": "system", "content": f"Previous Conversation Summary:\n{summary}"}] + messages
 
     try:
         pipeline = RAGPipeline()
@@ -416,7 +420,7 @@ You have structured job data (title, location, salary, skills, experience, apply
 Use "we" and "our" when referring to MHK — you're part of the team
 Guidelines — follow ALL of these:
 
-1. APPLY LINKS — Always include the apply link () for any job you mention. Never omit it.
+1. APPLY LINKS — Always include the exact raw apply link URL for any job you mention. DO NOT use markdown hyperlinks to hide the URL (e.g., do not use [Apply here](URL)). Expose the full address exactly as provided in the data.
 2. SKILLS / QUALIFICATIONS — When the user asks "what skills do I need?" or "am I qualified?" or
    "what qualifications does X require?" → list the exact skills from the job data clearly.
 3. SALARY / COMPENSATION — When asked about pay, salary, rate, or compensation:
@@ -425,15 +429,15 @@ Guidelines — follow ALL of these:
 4. EXPERIENCE — When asked about experience level, years needed, or seniority → state the requirement from the data.
 5. REMOTE / LOCATION — When asked if a role is remote, hybrid, or on-site → answer based on the REMOTE field and location.
 6. LISTING ALL JOBS — When the user asks "what jobs are available?" or similar → list all jobs concisely:
-   one per line with: title, location, salary range, and apply link.
+   one per line with: title, location, salary range, and the raw apply link.
 7. SPECIFIC JOB DETAIL — When the user asks about ONE specific role → give full detail:
-   skills, experience, salary, remote, description, and apply link.
+   skills, experience, salary, remote, description, and the raw apply link.
 8. NO MATCH — If no jobs match the query → warmly say so and direct them to https://www.mhktechinc.com/careers
    and hr@mhktechinc.com for openings not yet listed.
 9. TONE — Be warm, professional, and encouraging. End with an invitation to apply or ask more questions.
 
-Format apply links like:
- **Apply here:** <URL>"""
+Format apply links explicitly exposing the URL like:
+ **Apply via JobDiva:** <URL>"""
 
     messages = [
         {"role": "system", "content": system_msg},
@@ -450,7 +454,7 @@ Format apply links like:
     return {"type": "job_search", "response": content, "raw_jobs": search_result.get("jobs", [])}
 
 
-async def _run_direct_qa(query: str, session_id: str, messages: list, cost_log: LLMCostLog, sub_intent: str) -> dict:
+async def _run_direct_qa(query: str, session_id: str, messages: list, cost_log: LLMCostLog, sub_intent: str, summary: str = "") -> dict:
     """Run direct LLM QA for identity and greetings, bypassing RAG."""
     model = settings.OPENAI_MODEL
     
@@ -471,6 +475,9 @@ async def _run_direct_qa(query: str, session_id: str, messages: list, cost_log: 
         )
     else:
         system_msg = "You are MHK Nova, a helpful AI assistant for MHK Tech Inc."
+
+    if summary:
+        system_msg += f"\n\nPrevious Conversation Summary:\n{summary}"
 
     llm_messages = [{"role": "system", "content": system_msg}]
     
@@ -526,6 +533,7 @@ async def tool_selection_node(state: AgentState) -> dict:
     query = state["current_query"]
     session_id = state["session_id"]
     messages = state.get("messages", [])
+    summary = state.get("summary", "")
     meeting_session_id = state.get("meeting_session_id")
     cost_log = LLMCostLog(session_id=session_id)
 
@@ -541,9 +549,9 @@ async def tool_selection_node(state: AgentState) -> dict:
         elif intent == IntentType.JOB_SEARCH.value:
             tasks.append(_run_job_search(params, query, session_id, cost_log))
         elif intent == IntentType.GENERAL_QA.value and sub_intent in ("identity", "greeting"):
-            tasks.append(_run_direct_qa(query, session_id, messages, cost_log, sub_intent))
+            tasks.append(_run_direct_qa(query, session_id, messages, cost_log, sub_intent, summary))
         else:
-            tasks.append(_run_general_qa(query, session_id, messages, cost_log))
+            tasks.append(_run_general_qa(query, session_id, messages, cost_log, summary))
         intent_types.append(intent)
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -620,25 +628,6 @@ def response_node(state: AgentState) -> dict:
             logger.error(f"Response aggregation failed: {e}")
             combined = "\n\n".join(r.get("response", "") for r in tool_results)
 
-    # Append middle-question reminder if applicable
-    meeting_session_id = state.get("meeting_session_id")
-    if meeting_session_id and not any(r.get("type") == "meeting_scheduler" for r in tool_results):
-        from app.tools.meeting_scheduler import load_session
-        sess = load_session(meeting_session_id)
-        if sess and sess.state not in ("initial", "completed"):
-            reminder = ""
-            if sess.state == "awaiting_email":
-                reminder = "provide your business email"
-            elif sess.state == "awaiting_otp":
-                reminder = "enter the 6-digit verification code"
-            elif sess.state == "awaiting_duration":
-                reminder = "choose a meeting duration (1, 2, or 3)"
-            elif sess.state == "awaiting_slot":
-                reminder = "choose a time slot (1, 2, or 3)"
-            
-            if reminder:
-                combined += f"\n\n_*(Note: We are still in the middle of scheduling your meeting. Please {reminder} when you're ready.)*_"
-
     logger.info(f"[ResponseNode] session={session_id} aggregated {len(tool_results)} responses")
     return {
         "final_response": combined,
@@ -652,37 +641,82 @@ def response_node(state: AgentState) -> dict:
 # =============================================================================
 
 def memory_update_node(state: AgentState) -> dict:
-    """Append this turn's messages to the conversation history."""
+    """Append this turn's messages, maintaining a rolling summary for older memory."""
     messages = list(state.get("messages", []))
     query = state.get("current_query", "")
     response = state.get("final_response", "")
+    summary = state.get("summary", "")
+    session_id = state.get("session_id", "unknown")
+
+    cost_log_dict = state.get("cost_log", {})
+    cost_log = LLMCostLog(session_id=session_id)
+    if cost_log_dict:
+        cost_log.total_prompt_tokens = cost_log_dict.get("total_prompt_tokens", 0)
+        cost_log.total_completion_tokens = cost_log_dict.get("total_completion_tokens", 0)
+        cost_log.total_tokens = cost_log_dict.get("total_tokens", 0)
+        cost_log.total_cost_usd = cost_log_dict.get("total_cost_usd", 0.0)
+        cost_log.calls = [LLMUsage(**c) for c in cost_log_dict.get("calls", [])]
 
     if query:
         messages.append({"role": "user", "content": query})
     if response:
         messages.append({"role": "assistant", "content": response})
 
-    # Keep last N turns
-    max_history = settings.MAX_CONVERSATION_HISTORY * 2  # each turn = 2 messages
+    # Keep last N messages natively, summarize remainder
+    # The user explicitly requested retaining only the past 5 messages exactly
+    max_history = 5
+    
+    new_summary = summary
     if len(messages) > max_history:
-        messages = messages[-max_history:]
+        to_summarize_count = len(messages) - max_history
+        to_summarize = messages[:to_summarize_count]
+        messages = messages[to_summarize_count:]
+
+        conv_text = "\n".join(f"{msg.get('role', 'user').capitalize()}: {msg.get('content', '')}" for msg in to_summarize)
+        system_msg = (
+            "You are summarizing a conversation between a user and an AI assistant. "
+            "Progressively summarize the lines of conversation provided, adding onto the previous summary "
+            "returning a new, concise summary. Maintain key facts, user preferences, and context.\n"
+            "CRITICAL RULES:\n"
+            "1. Keep summary under 200 words.\n"
+            "2. Preserve only important facts, entities, user preferences.\n"
+            "3. Remove all small talk."
+        )
+        if summary:
+            user_msg = f"Current summary:\n{summary}\n\nNew conversation lines to add:\n{conv_text}"
+        else:
+            user_msg = f"Conversation lines to summarize:\n{conv_text}"
+
+        try:
+            model = settings.OPENAI_MODEL
+            new_summary_text, usage = _chat_completion(
+                [{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
+                model=model, max_tokens=400
+            )
+            llm_usage = _track_cost(usage, model, stage="memory_summarization", intent="system", session_id=session_id)
+            cost_log.add(llm_usage)
+            new_summary = new_summary_text
+        except Exception as e:
+            logger.error(f"Memory summarization failed: {e}")
+
+    # Persist memory to Redis / Backend store securely
+    from app.agent.memory import save_memory
+    save_memory(session_id, messages, new_summary)
 
     # Log total turn cost
-    cost_log_dict = state.get("cost_log", {})
-    if cost_log_dict:
-        total = cost_log_dict.get("total_cost_usd", 0)
-        total_tokens = cost_log_dict.get("total_tokens", 0)
-        logger.info(
-            f"[MemoryNode] session={state['session_id']} "
-            f"turn_tokens={total_tokens} turn_cost=${total:.6f}"
-        )
-        get_cost_tracker().log_turn_cost(
-            type("CL", (), {
-                "session_id": state["session_id"],
-                "total_tokens": total_tokens,
-                "total_cost_usd": total,
-                "calls": [],
-            })()
-        )
+    total_tokens = cost_log.total_tokens
+    total_cost = cost_log.total_cost_usd
+    logger.info(
+        f"[MemoryNode] session={session_id} saved {len(messages)} messages, summary_len={len(new_summary)} "
+        f"turn_tokens={total_tokens} turn_cost=${total_cost:.6f}"
+    )
+    get_cost_tracker().log_turn_cost(
+        type("CL", (), {
+            "session_id": session_id,
+            "total_tokens": total_tokens,
+            "total_cost_usd": total_cost,
+            "calls": [],
+        })()
+    )
 
-    return {"messages": messages}
+    return {"messages": messages, "summary": new_summary, "cost_log": cost_log.to_dict()}
